@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="fel-api/fel-api.csproj"/>
+  <Project Path="fel-api.Tests/fel-api.Tests.csproj"/>
 </Solution>
