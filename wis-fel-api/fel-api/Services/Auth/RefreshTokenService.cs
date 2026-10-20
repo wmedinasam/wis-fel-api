@@ -28,12 +28,12 @@ public sealed class RefreshTokenService(
         CancellationToken cancellationToken = default) =>
         IssueAsync(null, agent, cancellationToken);
 
-    public Task<IssuedTokenPair?> RotateForPlatformUserAsync(
+    public async Task<IssuedTokenPair?> RotateForPlatformUserAsync(
         string refreshToken,
         CancellationToken cancellationToken = default) =>
-        RotateAsync(refreshToken, isPlatformUser: true, cancellationToken);
+        (await RotateAsync(refreshToken, isPlatformUser: true, cancellationToken))?.Tokens;
 
-    public Task<IssuedTokenPair?> RotateForAgentAsync(
+    public Task<AgentRotation?> RotateForAgentAsync(
         string refreshToken,
         CancellationToken cancellationToken = default) =>
         RotateAsync(refreshToken, isPlatformUser: false, cancellationToken);
@@ -66,7 +66,7 @@ public sealed class RefreshTokenService(
         return new IssuedTokenPair(accessToken.Value, accessToken.ExpiresAtUtc, rawToken, expiresAt);
     }
 
-    private async Task<IssuedTokenPair?> RotateAsync(
+    private async Task<AgentRotation?> RotateAsync(
         string rawToken,
         bool isPlatformUser,
         CancellationToken cancellationToken)
@@ -100,6 +100,7 @@ public sealed class RefreshTokenService(
 
         UserAccount? userAccount = null;
         Agent? agent = null;
+        TenantSubscriptionState? licenseState = null;
         if (isPlatformUser)
         {
             userAccount = await dbContext.UserAccounts
@@ -124,7 +125,7 @@ public sealed class RefreshTokenService(
                 return null;
             }
 
-            await agentLicenseValidator.ValidateAsync(agent.TenantId, cancellationToken);
+            licenseState = await agentLicenseValidator.ValidateAsync(agent.TenantId, cancellationToken);
         }
 
         var replacementRawToken = TokenHashing.CreateSecret();
@@ -148,7 +149,9 @@ public sealed class RefreshTokenService(
         var accessToken = userAccount is not null
             ? tokenIssuer.IssuePlatformToken(userAccount)
             : tokenIssuer.IssueAgentToken(agent!);
-        return new IssuedTokenPair(accessToken.Value, accessToken.ExpiresAtUtc, replacementRawToken, replacementExpiresAt);
+        return new AgentRotation(
+            new IssuedTokenPair(accessToken.Value, accessToken.ExpiresAtUtc, replacementRawToken, replacementExpiresAt),
+            licenseState);
     }
 
     private async Task RevokeFamilyAsync(Guid familyId, DateTimeOffset revokedAtUtc, CancellationToken cancellationToken)
@@ -165,3 +168,6 @@ public sealed class RefreshTokenService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 }
+
+/// <summary>Tokens rotated for an agent, plus the license state the refresh just validated.</summary>
+public sealed record AgentRotation(IssuedTokenPair Tokens, TenantSubscriptionState? LicenseState);

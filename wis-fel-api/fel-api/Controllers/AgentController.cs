@@ -56,14 +56,14 @@ public sealed class AgentController(
     [HttpPost("token/refresh")]
     [AllowAnonymous]
     [EnableRateLimiting("agent-refresh")]
-    public async Task<ActionResult<AuthTokenResponse>> Refresh(
+    public async Task<ActionResult<AgentRefreshResponse>> Refresh(
         [FromBody] AgentRefreshRequest request,
         CancellationToken cancellationToken)
     {
         try
         {
-            var tokens = await refreshTokenService.RotateForAgentAsync(request.RefreshToken, cancellationToken);
-            return tokens is null ? Unauthorized() : Ok(AuthTokenResponse.From(tokens));
+            var rotation = await refreshTokenService.RotateForAgentAsync(request.RefreshToken, cancellationToken);
+            return rotation is null ? Unauthorized() : Ok(AgentRefreshResponse.From(rotation));
         }
         catch (AgentLicenseInvalidException)
         {
@@ -108,7 +108,8 @@ public sealed class AgentController(
     public async Task<ActionResult<AgentCertifierConfigurationResponse>> GetCertifierConfiguration(
         CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.FindFirstValue("tenant_id"), out var tenantId)
+        if (!Guid.TryParse(User.FindFirstValue("agent_id"), out var agentId)
+            || !Guid.TryParse(User.FindFirstValue("tenant_id"), out var tenantId)
             || !Guid.TryParse(User.FindFirstValue("company_id"), out var companyId))
         {
             return Forbid();
@@ -117,10 +118,17 @@ public sealed class AgentController(
         try
         {
             await licenseValidator.ValidateAsync(tenantId, cancellationToken);
-            var configuration = await certifierConfigurationResolver.ResolveForCompanyAsync(
+            var configuration = await certifierConfigurationResolver.ResolveForActiveAgentAsync(
+                agentId,
                 tenantId,
                 companyId,
                 cancellationToken);
+            if (configuration is null)
+            {
+                // Revoked after the access token was issued: the token is still valid for minutes, the secrets are not.
+                return Unauthorized();
+            }
+
             return Ok(new AgentCertifierConfigurationResponse(
                 configuration.CertifierCode,
                 configuration.CountryCode,
@@ -238,6 +246,24 @@ public sealed record AgentHandshakeResponse(
         result.HandshakenAtUtc,
         result.TenantId,
         result.CompanyId);
+}
+
+/// <summary>Refresh response for the worker: the tokens plus the license state the worker syncs on.</summary>
+public sealed record AgentRefreshResponse(
+    string AccessToken,
+    string TokenType,
+    DateTimeOffset AccessTokenExpiresAtUtc,
+    string RefreshToken,
+    DateTimeOffset RefreshTokenExpiresAtUtc,
+    TenantSubscriptionState? LicenseState)
+{
+    public static AgentRefreshResponse From(AgentRotation rotation) => new(
+        rotation.Tokens.AccessToken,
+        "Bearer",
+        rotation.Tokens.AccessTokenExpiresAtUtc,
+        rotation.Tokens.RefreshToken,
+        rotation.Tokens.RefreshTokenExpiresAtUtc,
+        rotation.LicenseState);
 }
 
 public sealed record AgentCertifierConfigurationResponse(

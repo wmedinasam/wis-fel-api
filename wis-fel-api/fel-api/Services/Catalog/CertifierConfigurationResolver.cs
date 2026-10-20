@@ -27,6 +27,20 @@ public sealed class CertifierConfigurationResolver(
         CancellationToken cancellationToken = default) =>
         await ResolveForCompanyAsync((Guid?)tenantId, companyId, cancellationToken);
 
+    /// <summary>Null when the agent is revoked or does not belong to the company: its token must not expose secrets.</summary>
+    public async Task<ResolvedCertifierConfiguration?> ResolveForActiveAgentAsync(
+        Guid agentId,
+        Guid tenantId,
+        Guid companyId,
+        CancellationToken cancellationToken = default)
+    {
+        var agentIsActive = await dbContext.Agents
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == agentId && x.IsActive && x.TenantId == tenantId && x.CompanyId == companyId, cancellationToken);
+
+        return agentIsActive ? await ResolveForCompanyAsync(tenantId, companyId, cancellationToken) : null;
+    }
+
     private async Task<ResolvedCertifierConfiguration> ResolveForCompanyAsync(
         Guid? tenantId,
         Guid companyId,

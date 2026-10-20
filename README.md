@@ -357,6 +357,8 @@ curl -X POST http://localhost:5070/agent/token/refresh \
   -d '{"refreshToken":"<refreshToken>"}'
 ```
 
+Respuesta 200 con `accessToken`, `refreshToken` y `licenseState`, el estado de licencia que el worker sincroniza en cada refresh. 401 si el refresh token no es válido o el agente está revocado, 403 si la licencia no es válida.
+
 **Heartbeat** (`Agent`, `agent-heartbeat`):
 
 ```bash
@@ -368,7 +370,7 @@ curl -X POST http://localhost:5070/agent/heartbeat \
 
 Respuesta 200: `{serverTimeUtc, pendingCommands:[{id, type, payload, leaseExpiresAtUtc}]}`.
 
-Un comando `ResendDocument` llega con `payload` igual a `{"documentId":"<guid>","idempotencyKey":"..."}`. El worker hace ack del comando enviando su id en `acknowledgedCommandIds` en el siguiente heartbeat.
+Un comando `ResendDocument` llega con `payload` como string JSON: `"{\"documentId\":\"<guid>\",\"idempotencyKey\":\"...\"}"`. El worker hace ack del comando enviando su id en `acknowledgedCommandIds` en el siguiente heartbeat.
 
 **Configuración del certificador** (`Agent`, `agent-configuration`):
 
@@ -392,7 +394,7 @@ El `tenantId` y el `companyId` salen del token, nunca del request. Respuesta 200
 
 - `requestFormat` es el enum `CertifierRequestFormat` (`0` = Json, `1` = Xml).
 - `credentials` llega en claro sobre TLS y viene vacío si aún no se han cargado. El worker las guarda cifradas en local.
-- Errores: 403 si la licencia no es válida, 404 si la empresa no existe, 409 si no tiene asignación de certificador o está inactiva, 500 si las credenciales no se pueden descifrar (key ring de Data Protection perdido).
+- Errores: 401 si el agente está revocado (su access token sigue vigente hasta caducar, por eso se revisa en cada llamada), 403 si la licencia no es válida, 404 si la empresa no existe, 409 si no tiene asignación de certificador o está inactiva, 500 si las credenciales no se pueden descifrar (key ring de Data Protection perdido).
 
 **Reportar estado de documentos** (`Agent`, `agent-document-status`):
 
@@ -553,9 +555,9 @@ Los tests usan EF Core InMemory, así que no necesitan SQL Server.
 - Una clave de prueba y un límite de login de 2 por minuto.
 - Una clave simétrica local para `ClientJwt`, que reemplaza al IdP externo y permite probar los endpoints de tenant.
 
-Cobertura actual (23 tests):
+Cobertura actual (25 tests):
 
-- `AgentApiTests` (9): login solo para administradores, `/auth/me`, rate limit de login, handshake y heartbeat con comando, rotación de refresh tokens y rechazo de reuso, provisionamiento y revocación, carga de credenciales de certificador y entrega al worker (comprobando que en la base están cifradas), y 409 cuando la empresa no tiene asignación.
+- `AgentApiTests` (11): login solo para administradores, `/auth/me`, rate limit de login, handshake y heartbeat con comando, rotación de refresh tokens y rechazo de reuso, provisionamiento y revocación, carga de credenciales de certificador y entrega al worker (comprobando que en la base están cifradas), 409 cuando la empresa no tiene asignación, `licenseState` como texto en handshake y refresh, y 401 para un agente revocado con token todavía vigente.
 - `DocumentApiTests` (3):
   - Upsert del estado y rechazo de una sucursal ajena.
   - Filtro por estado y reenvío desde plataforma, con el comando entregado en el heartbeat y 409 para `Certified` y para un reenvío duplicado.

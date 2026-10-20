@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../wis-fel-worker"
+		},
+		{
+			"path": "../wis-fel-web"
+		}
+	],
+	"settings": {
+		"csharp-dev-tools.solutionViewer.selectedWorkspaceSolutions": [
+			"wis-fel-api/wis-fel-api.slnx",
+			"WisFel.Worker.slnx"
+		]
+	}
+}

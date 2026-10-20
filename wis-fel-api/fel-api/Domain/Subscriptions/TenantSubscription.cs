@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using fel_api.Domain.Tenants;
 
 namespace fel_api.Domain.Subscriptions;
@@ -15,6 +16,8 @@ public sealed class TenantSubscription
     public SubscriptionPlan SubscriptionPlan { get; set; } = null!;
 }
 
+// El worker lee licenseState como texto: sin este converter saldría como 0/1/2.
+[JsonConverter(typeof(JsonStringEnumConverter<TenantSubscriptionState>))]
 public enum TenantSubscriptionState
 {
     Active,

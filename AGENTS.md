@@ -68,7 +68,7 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 
 ## 7. Multi tenant
 
-- `tenant_id` en todas las tablas + **Row Level Security** de PostgreSQL.
+- `tenant_id` en todas las tablas. No hay Row Level Security: el aislamiento se aplica en la capa de aplicación con los claims del token.
 - El `tenant_id` se toma siempre del token, nunca del request.
 
 ## 8. Planes y licenciamiento
@@ -93,7 +93,7 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 
 ### 8.3 JWT de licencia
 
-- Firma **RS256**: clave privada en la API, clave pública en el worker.
+- Firma **RS256**: clave privada en la API, clave pública en el worker. *(Implementación actual: HS256, decisión pendiente en el README.)*
 - Claims: `tenant_id`, `plan`, `max_empresas`, `max_sucursales`, `vence`, `instance_id`.
 - Vigencia corta (24 a 72 h), renovada automáticamente con el refresh token.
 - Lifetime: el plan no vence, pero el JWT se sigue renovando.
@@ -199,7 +199,7 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 
 ## 13. Siguientes pasos
 
-1. Modelo de datos completo (DDL PostgreSQL + RLS).
+1. Modelo de datos completo (DDL SQL Server).
 2. Estructura de los repos y proyecto de contratos compartidos.
 3. Esqueleto de la API (identidad, tenants, planes, activación).
 4. Esqueleto del Worker (cola SQLite, providers, activación).

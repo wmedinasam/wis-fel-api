@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using System.Net.Http.Json;
 using fel_api.Auth;
 using fel_api.Data;
@@ -255,6 +256,63 @@ public sealed class AgentApiTests
         Assert.Single(await dbContext.AuditLogs
             .Where(x => x.EventType == "certifier-credentials-updated")
             .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Handshake_And_Refresh_ReportLicenseStateAsText()
+    {
+        // The worker declares licenseState as text; a bare enum would travel as 0/1/2 and break its handshake.
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAgentAsync(factory);
+
+        var handshakeResponse = await client.PostAsJsonAsync("/agent/handshake", new
+        {
+            AgentId = seeded.Agent.Id,
+            Secret = seeded.Secret,
+            WorkerVersion = "1.2.3"
+        });
+        Assert.Equal(HttpStatusCode.OK, handshakeResponse.StatusCode);
+        using var handshakeJson = JsonDocument.Parse(await handshakeResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Active", handshakeJson.RootElement.GetProperty("licenseState").GetString());
+        var refreshToken = handshakeJson.RootElement.GetProperty("refreshToken").GetString();
+
+        var refreshResponse = await client.PostAsJsonAsync("/agent/token/refresh", new { RefreshToken = refreshToken });
+        Assert.Equal(HttpStatusCode.OK, refreshResponse.StatusCode);
+        using var refreshJson = JsonDocument.Parse(await refreshResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Active", refreshJson.RootElement.GetProperty("licenseState").GetString());
+    }
+
+    [Fact]
+    public async Task CertifierConfiguration_RejectsRevokedAgentStillHoldingAToken()
+    {
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAgentAsync(factory);
+        await SeedCertifierAssignmentAsync(factory, seeded.Agent.CompanyId);
+
+        var handshakeResponse = await client.PostAsJsonAsync("/agent/handshake", new
+        {
+            AgentId = seeded.Agent.Id,
+            Secret = seeded.Secret,
+            WorkerVersion = "1.2.3"
+        });
+        var agentTokens = await handshakeResponse.Content.ReadFromJsonAsync<AgentTokenResponse>();
+        Assert.NotNull(agentTokens);
+
+        // Revoked after the access token was issued: the token still verifies, the agent row does not.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<FelApiDbContext>();
+            var agent = await dbContext.Agents.SingleAsync(x => x.Id == seeded.Agent.Id);
+            agent.IsActive = false;
+            await dbContext.SaveChangesAsync();
+        }
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", agentTokens.AccessToken);
+        var configurationResponse = await client.GetAsync("/agent/certifier-configuration");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, configurationResponse.StatusCode);
     }
 
     [Fact]
