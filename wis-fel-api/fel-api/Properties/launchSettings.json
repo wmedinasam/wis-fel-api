@@ -9,7 +9,7 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "launchUrl": "openapi-ui"
+      "launchUrl": "scalar/v1"
     },
     "https": {
       "commandName": "Project",
@@ -19,7 +19,7 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "launchUrl": "openapi-ui"
+      "launchUrl": "scalar/v1"
     }
   }
 }

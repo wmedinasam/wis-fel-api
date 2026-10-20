@@ -1,4 +1,4 @@
-using OpenApiUi;
+using Scalar.AspNetCore;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -169,9 +169,11 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-    app.UseOpenApiUi(config =>
+    app.MapScalarApiReference(options =>
     {
-        config.OpenApiSpecPath = "/openapi/v1.json";
+        options.Title = "API de la Plataforma de Firma Electrónica";
+        options.Theme = ScalarTheme.Purple; // Cambiar tema visual
+        options.DefaultHttpClient = new KeyValuePair<ScalarTarget, ScalarClient>(ScalarTarget.CSharp, ScalarClient.HttpClient);
     });
 }
 
