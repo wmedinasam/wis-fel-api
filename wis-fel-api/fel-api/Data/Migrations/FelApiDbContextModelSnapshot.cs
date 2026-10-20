@@ -412,78 +412,70 @@ namespace fel_api.Data.Migrations
                     b.ToTable("CompanyCertifierAssignments", (string)null);
                 });
 
-            modelBuilder.Entity("fel_api.Domain.Documents.DocumentDeliveryAttempt", b =>
+            modelBuilder.Entity("fel_api.Domain.Documents.Document", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<int>("AttemptNumber")
+                    b.Property<Guid>("AgentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AttemptCount")
                         .HasColumnType("int");
 
-                    b.Property<DateTimeOffset?>("CompletedAtUtc")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<Guid>("DocumentSubmissionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ErrorDetails")
-                        .HasMaxLength(4000)
-                        .HasColumnType("nvarchar(4000)");
-
-                    b.Property<int?>("HttpStatusCode")
-                        .HasColumnType("int");
-
-                    b.Property<string>("RequestPayload")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("ResponsePayload")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTimeOffset>("StartedAtUtc")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<bool?>("Succeeded")
-                        .HasColumnType("bit");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DocumentSubmissionId", "AttemptNumber")
-                        .IsUnique();
-
-                    b.ToTable("DocumentDeliveryAttempts", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_DocumentDeliveryAttempts_AttemptNumber", "[AttemptNumber] > 0");
-                        });
-                });
-
-            modelBuilder.Entity("fel_api.Domain.Documents.DocumentSubmission", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("AgentId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("AuthorizationNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<Guid?>("BranchId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTimeOffset?>("CertifiedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<string>("IdempotencyKey")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<string>("IncomingPayload")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTimeOffset>("ReceivedAtUtc")
+                    b.Property<DateTimeOffset>("IssuedAtUtc")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("LastReportedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Number")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("ResendRequestedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Series")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -497,7 +489,12 @@ namespace fel_api.Data.Migrations
 
                     b.HasIndex("TenantId", "CompanyId", "BranchId");
 
-                    b.ToTable("Documents", (string)null);
+                    b.HasIndex("TenantId", "CompanyId", "Status", "IssuedAtUtc");
+
+                    b.ToTable("Documents", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Documents_AttemptCount", "[AttemptCount] >= 0");
+                        });
                 });
 
             modelBuilder.Entity("fel_api.Domain.Identity.ActivationCode", b =>
@@ -911,24 +908,14 @@ namespace fel_api.Data.Migrations
                     b.Navigation("Company");
                 });
 
-            modelBuilder.Entity("fel_api.Domain.Documents.DocumentDeliveryAttempt", b =>
-                {
-                    b.HasOne("fel_api.Domain.Documents.DocumentSubmission", "DocumentSubmission")
-                        .WithMany()
-                        .HasForeignKey("DocumentSubmissionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("DocumentSubmission");
-                });
-
-            modelBuilder.Entity("fel_api.Domain.Documents.DocumentSubmission", b =>
+            modelBuilder.Entity("fel_api.Domain.Documents.Document", b =>
                 {
                     b.HasOne("fel_api.Domain.Agents.Agent", null)
                         .WithMany()
                         .HasForeignKey("TenantId", "AgentId")
                         .HasPrincipalKey("TenantId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("fel_api.Domain.Catalog.Company", "Company")
                         .WithMany()

@@ -30,8 +30,7 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 	public DbSet<CertifierCountryConfiguration> CertifierCountryConfigurations => Set<CertifierCountryConfiguration>();
 	public DbSet<CompanyCertifierAssignment> CompanyCertifierAssignments => Set<CompanyCertifierAssignment>();
 	public DbSet<ActivationCode> ActivationCodes => Set<ActivationCode>();
-	public DbSet<DocumentSubmission> DocumentSubmissions => Set<DocumentSubmission>();
-	public DbSet<DocumentDeliveryAttempt> DocumentDeliveryAttempts => Set<DocumentDeliveryAttempt>();
+	public DbSet<Document> Documents => Set<Document>();
 	public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
 	protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -310,13 +309,22 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 				.OnDelete(DeleteBehavior.Restrict);
 		});
 
-		modelBuilder.Entity<DocumentSubmission>(entity =>
+		modelBuilder.Entity<Document>(entity =>
 		{
-			entity.ToTable("Documents");
+			entity.ToTable("Documents", table => table.HasCheckConstraint(
+				"CK_Documents_AttemptCount",
+				"[AttemptCount] >= 0"));
 			entity.HasKey(x => x.Id);
 			entity.Property(x => x.IdempotencyKey).HasMaxLength(200).IsRequired();
-			entity.Property(x => x.IncomingPayload).HasColumnType("nvarchar(max)").IsRequired();
+			entity.Property(x => x.DocumentType).HasMaxLength(20).IsRequired();
+			entity.Property(x => x.Series).HasMaxLength(50);
+			entity.Property(x => x.Number).HasMaxLength(50);
+			entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+			entity.Property(x => x.AuthorizationNumber).HasMaxLength(100);
+			entity.Property(x => x.ErrorCode).HasMaxLength(100);
+			entity.Property(x => x.ErrorMessage).HasMaxLength(4000);
 			entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
+			entity.HasIndex(x => new { x.TenantId, x.CompanyId, x.Status, x.IssuedAtUtc });
 			entity.HasOne(x => x.Company)
 				.WithMany()
 				.HasForeignKey(x => new { x.TenantId, x.CompanyId })
@@ -331,22 +339,6 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 				.WithMany()
 				.HasForeignKey(x => new { x.TenantId, x.CompanyId, x.BranchId })
 				.HasPrincipalKey(x => new { x.TenantId, x.CompanyId, x.Id })
-				.OnDelete(DeleteBehavior.Restrict);
-		});
-
-		modelBuilder.Entity<DocumentDeliveryAttempt>(entity =>
-		{
-			entity.ToTable("DocumentDeliveryAttempts", table => table.HasCheckConstraint(
-				"CK_DocumentDeliveryAttempts_AttemptNumber",
-				"[AttemptNumber] > 0"));
-			entity.HasKey(x => x.Id);
-			entity.Property(x => x.RequestPayload).HasColumnType("nvarchar(max)").IsRequired();
-			entity.Property(x => x.ResponsePayload).HasColumnType("nvarchar(max)");
-			entity.Property(x => x.ErrorDetails).HasMaxLength(4000);
-			entity.HasIndex(x => new { x.DocumentSubmissionId, x.AttemptNumber }).IsUnique();
-			entity.HasOne(x => x.DocumentSubmission)
-				.WithMany()
-				.HasForeignKey(x => x.DocumentSubmissionId)
 				.OnDelete(DeleteBehavior.Restrict);
 		});
 

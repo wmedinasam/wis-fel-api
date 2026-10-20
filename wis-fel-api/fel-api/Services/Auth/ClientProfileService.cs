@@ -19,19 +19,8 @@ public sealed class ClientProfileService(FelApiDbContext dbContext)
         ClaimsPrincipal principal,
         CancellationToken cancellationToken = default)
     {
-        var subject = principal.FindFirstValue("sub");
-        var issuer = principal.FindFirstValue("iss")
-            ?? principal.FindFirst(x => x.Type == "sub")?.Issuer;
-        if (string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(issuer))
-        {
-            return null;
-        }
-
-        var user = await dbContext.ExternalUserIdentities
-            .Where(x => x.Issuer == issuer && x.Subject == subject)
-            .Select(x => x.UserAccount)
-            .SingleOrDefaultAsync(cancellationToken);
-        if (user is null || !user.IsActive)
+        var user = await ResolveUserAsync(principal, cancellationToken);
+        if (user is null)
         {
             return null;
         }
@@ -67,5 +56,61 @@ public sealed class ClientProfileService(FelApiDbContext dbContext)
         }).ToArray();
 
         return new ClientProfileResponse(user.Id, user.Email, user.DisplayName, tenants);
+    }
+
+    /// <summary>
+    /// Returns the companies of <paramref name="tenantId"/> the user can access, or null without an active membership.
+    /// A role with no company restrictions grants every company of the tenant.
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>?> ResolveCompanyAccessAsync(
+        ClaimsPrincipal principal,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await ResolveUserAsync(principal, cancellationToken);
+        if (user is null || !await dbContext.TenantMemberships.AnyAsync(
+            x => x.TenantId == tenantId && x.UserAccountId == user.Id && x.IsActive,
+            cancellationToken))
+        {
+            return null;
+        }
+
+        var roleIds = await dbContext.TenantUserRoles
+            .Where(x => x.TenantId == tenantId && x.UserAccountId == user.Id)
+            .Select(x => x.TenantRoleId)
+            .ToListAsync(cancellationToken);
+        var restrictions = await dbContext.TenantRoleCompanies
+            .Where(x => x.TenantId == tenantId && roleIds.Contains(x.TenantRoleId))
+            .Select(x => new { x.TenantRoleId, x.CompanyId })
+            .ToListAsync(cancellationToken);
+
+        if (roleIds.Any(roleId => restrictions.All(x => x.TenantRoleId != roleId)))
+        {
+            return await dbContext.Companies
+                .Where(x => x.TenantId == tenantId)
+                .Select(x => x.Id)
+                .ToListAsync(cancellationToken);
+        }
+
+        return restrictions.Select(x => x.CompanyId).Distinct().ToArray();
+    }
+
+    private async Task<Domain.Identity.UserAccount?> ResolveUserAsync(
+        ClaimsPrincipal principal,
+        CancellationToken cancellationToken)
+    {
+        var subject = principal.FindFirstValue("sub");
+        var issuer = principal.FindFirstValue("iss")
+            ?? principal.FindFirst(x => x.Type == "sub")?.Issuer;
+        if (string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(issuer))
+        {
+            return null;
+        }
+
+        var user = await dbContext.ExternalUserIdentities
+            .Where(x => x.Issuer == issuer && x.Subject == subject)
+            .Select(x => x.UserAccount)
+            .SingleOrDefaultAsync(cancellationToken);
+        return user is { IsActive: true } ? user : null;
     }
 }

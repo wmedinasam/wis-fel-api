@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
 using fel_api.Auth;
 using fel_api.Data;
 using fel_api.Domain.Agents;
@@ -197,39 +196,7 @@ public sealed class AgentApiTests
         Assert.Equal(HttpStatusCode.NoContent, revokeResponse.StatusCode);
     }
 
-    [Fact]
-    public async Task Documents_PersistsPayloadAndFailsClosedWithoutMapper()
-    {
-        await using var factory = new ApiFactory();
-        using var client = factory.CreateClient();
-        var seeded = await SeedAgentAsync(factory, includeCertifier: true);
-        var handshakeResponse = await client.PostAsJsonAsync("/agent/handshake", new
-        {
-            AgentId = seeded.Agent.Id,
-            Secret = seeded.Secret,
-            WorkerVersion = "1.2.3"
-        });
-        var tokens = await handshakeResponse.Content.ReadFromJsonAsync<AgentTokenResponse>();
-        Assert.NotNull(tokens);
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/agent/documents")
-        {
-            Content = new StringContent("{\"workerPayload\":true}", Encoding.UTF8, "application/json")
-        };
-        request.Headers.Add("Idempotency-Key", "doc-0001");
-        var response = await client.SendAsync(request);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        using var scope = factory.Services.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<FelApiDbContext>();
-        var document = await dbContext.DocumentSubmissions.SingleAsync();
-        Assert.Equal(seeded.Agent.Id, document.AgentId);
-        Assert.Equal("{\"workerPayload\":true}", document.IncomingPayload);
-        Assert.Empty(await dbContext.DocumentDeliveryAttempts.ToListAsync());
-    }
-
-    private static async Task<UserAccount> SeedUserAsync(ApiFactory factory, bool isPlatformAdministrator)
+    internal static async Task<UserAccount> SeedUserAsync(ApiFactory factory, bool isPlatformAdministrator)
     {
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<FelApiDbContext>();
@@ -251,7 +218,7 @@ public sealed class AgentApiTests
         return user;
     }
 
-    private static async Task<(Agent Agent, string Secret)> SeedAgentAsync(ApiFactory factory, bool includeCertifier = false)
+    internal static async Task<(Agent Agent, string Secret)> SeedAgentAsync(ApiFactory factory)
     {
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<FelApiDbContext>();
@@ -285,26 +252,6 @@ public sealed class AgentApiTests
             IsCurrent = true
         });
 
-        if (includeCertifier)
-        {
-            var certifier = new Certifier { Code = "INFILE", Name = "Infile" };
-            var configuration = new CertifierCountryConfiguration
-            {
-                CertifierId = certifier.Id,
-                CountryCode = company.CountryCode,
-                EndpointUrl = "https://certifier.example/gt",
-                RequestFormat = CertifierRequestFormat.Json
-            };
-            dbContext.Certifiers.Add(certifier);
-            dbContext.CertifierCountryConfigurations.Add(configuration);
-            dbContext.CompanyCertifierAssignments.Add(new CompanyCertifierAssignment
-            {
-                CompanyId = company.Id,
-                CountryCode = company.CountryCode,
-                CertifierCountryConfigurationId = configuration.Id
-            });
-        }
-
         const string secret = "provisioned-agent-secret-for-tests";
         var agent = new Agent
         {
@@ -319,17 +266,17 @@ public sealed class AgentApiTests
         return (agent, secret);
     }
 
-    private sealed record AgentTokenResponse(
+    internal sealed record AgentTokenResponse(
         string AccessToken,
         string TokenType,
         DateTimeOffset AccessTokenExpiresAtUtc,
         string RefreshToken,
         DateTimeOffset RefreshTokenExpiresAtUtc);
 
-    private sealed record HeartbeatResponse(
+    internal sealed record HeartbeatResponse(
         DateTimeOffset ServerTimeUtc,
         IReadOnlyList<PendingCommandResponse> PendingCommands);
 
-    private sealed record PendingCommandResponse(Guid Id, string Type, string Payload, DateTimeOffset LeaseExpiresAtUtc);
+    internal sealed record PendingCommandResponse(Guid Id, string Type, string Payload, DateTimeOffset LeaseExpiresAtUtc);
     private sealed record ProvisionedAgentResponse(Guid AgentId, string Secret);
 }

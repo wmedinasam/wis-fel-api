@@ -10,8 +10,10 @@ public sealed class RateLimitOptions
     public FixedWindowLimit AgentRefresh { get; set; } = new(20, 60);
     public FixedWindowLimit ClientMe { get; set; } = new(60, 60);
     public FixedWindowLimit AgentHeartbeat { get; set; } = new(120, 60);
-    public FixedWindowLimit AgentDocuments { get; set; } = new(60, 60);
+    public FixedWindowLimit AgentDocumentStatus { get; set; } = new(60, 60);
     public FixedWindowLimit PlatformAgentManagement { get; set; } = new(30, 60);
+    public FixedWindowLimit PlatformDocuments { get; set; } = new(60, 60);
+    public FixedWindowLimit TenantDocuments { get; set; } = new(60, 60);
 }
 
 public sealed class FixedWindowLimit

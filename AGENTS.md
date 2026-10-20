@@ -17,10 +17,10 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 |---|---|
 | Frontend (portal cliente y admin) | React |
 | API | ASP.NET Core (.NET 10) |
-| Base de datos central | PostgreSQL |
+| Base de datos central | SQL Server (implementado; el plan original decía PostgreSQL) |
 | Worker cliente | .NET 10 Worker Service (C#) |
-| Cola local del worker | MS SQL Server |
-| Identidad | ASP.NET Core Identity + JWT |
+| Cola local del worker | La define el repo del worker (aquí §3 decía SQL Server y §10.3 dice SQLite) |
+| Identidad | JWT HS256 propio + `PasswordHasher` para admins; IdP externo (`ClientJwt`) para usuarios de tenant |
 | Resiliencia | Polly |
 
 ## 4. Repositorios
@@ -34,16 +34,20 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 ```
 [Portal Cliente]   [Portal Admin]
         \             /
-         [ API ASP.NET Core ] ---- [ PostgreSQL ]
-                |
-          HTTPS + JWT
-                |
+         [ API ASP.NET Core ] ---- [ SQL Server ]
+                |      ▲
+  licencia,     |      | estado de documentos (solo metadatos)
+  comandos      |      | POST /agent/documents/status
+  (heartbeat)   v      |
         [ Worker (por tenant) ]
-          |  cola SQLite
+          |  cola local
           |  providers por país/certificador
           v
    [ Certificadores: INFILE GT / SV / RD, otros ]
 ```
+
+- **La API nunca contacta a los certificadores.** Licencias, planes, clientes, empresas, sucursales y agentes viven en la API. La certificación y los reintentos viven en el worker.
+- El reenvío manual se ordena desde el portal, a través de la API. La API crea un comando `ResendDocument` que el worker recibe en el heartbeat y ejecuta.
 
 ## 6. Modelo de datos (alto nivel)
 
@@ -57,6 +61,10 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 - `instances` (workers activos), `activation_codes`.
 - `audit_log`.
 - `company_id` en documentos, series y correlativos.
+- `documents`: **solo metadatos** reportados por el worker.
+  - Campos: `idempotency_key` (única por tenant), tipo, serie, número, estado, número de autorización del certificador, código y mensaje de error, intentos, fechas de emisión, certificación y último reporte, y `resend_requested_at`.
+  - El XML o JSON firmado no se guarda en la central.
+- `pending_agent_commands`: comandos para el worker con lease, entregados en el heartbeat (por ejemplo `ResendDocument`).
 
 ## 7. Multi tenant
 
@@ -127,7 +135,8 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 
 ### 9.4 API
 
-- Una sola API con `/api/admin/*` y `/api/tenant/*`.
+- Una sola API con `/platform/*` (admin, JWT propio) y `/tenant/{tenantId}/*` (usuarios del IdP). El `tenantId` de la ruta solo se acepta con una membresía activa.
+- Los dos portales ven el estado de los documentos y pueden ordenar el reenvío manual: `/platform/documents` y `/tenant/{tenantId}/documents`.
 - Dos apps React (rutas separadas o dos builds).
 
 ## 10. Worker
@@ -159,8 +168,8 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 
 ### 10.4 Comunicación con la API
 
-- **Pull:** configuración y licencia cada X minutos (HTTPS + JWT).
-- **Push:** resultados y estado en lotes.
+- **Pull:** configuración y licencia cada X minutos (HTTPS + JWT). El heartbeat (`POST /agent/heartbeat`) entrega comandos pendientes, como `ResendDocument` con payload `{documentId, idempotencyKey}`. El worker hace ack con `acknowledgedCommandIds`.
+- **Push:** resultados y estado en lotes de hasta 100 a `POST /agent/documents/status`, con upsert por `idempotencyKey`. Se reporta cada cambio de estado, no solo el final.
 - Opcional: SignalR para avisos en tiempo real, con polling como respaldo.
 - **Idempotencia:** `idempotency_key` por documento.
 
@@ -173,6 +182,7 @@ Plataforma centralizada de licencias y administración para un servicio de factu
 - Licencia: periodo de gracia sin conexión.
 - Timeout con el certificador: antes de reintentar, consultar si el documento ya fue certificado para evitar duplicados.
 - **Dead-letter:** tras N intentos pasa a `Error` y se alerta en el portal.
+- **Reenvío manual:** el portal lo ordena y el worker lo ejecuta con el documento de su cola local. Antes de reenviar consulta al certificador si el documento ya fue certificado. Luego reporta el nuevo estado; un estado final limpia la marca de reenvío pendiente en la API.
 - **Heartbeat** para ver en el admin qué workers están desconectados.
 
 ## 11. Seguridad

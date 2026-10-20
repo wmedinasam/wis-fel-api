@@ -43,11 +43,10 @@ builder.Services.AddScoped<AgentLicenseValidator>();
 builder.Services.AddScoped<AgentProvisioningService>();
 builder.Services.AddScoped<AgentHandshakeService>();
 builder.Services.AddScoped<AgentHeartbeatService>();
-builder.Services.AddScoped<DocumentSubmissionService>();
+builder.Services.AddScoped<DocumentStatusService>();
+builder.Services.AddScoped<DocumentQueryService>();
 builder.Services.AddScoped<TenantQuotaValidator>();
 builder.Services.AddScoped<CertifierConfigurationResolver>();
-builder.Services.AddHttpClient("Certifier", client => client.Timeout = TimeSpan.FromSeconds(30))
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 
 builder.Services.AddOptions<JwtOptions>()
     .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
@@ -77,8 +76,10 @@ builder.Services.AddOptions<RateLimitOptions>()
         && options.AgentRefresh.IsValid
         && options.ClientMe.IsValid
         && options.AgentHeartbeat.IsValid
-        && options.AgentDocuments.IsValid
-        && options.PlatformAgentManagement.IsValid,
+        && options.AgentDocumentStatus.IsValid
+        && options.PlatformAgentManagement.IsValid
+        && options.PlatformDocuments.IsValid
+        && options.TenantDocuments.IsValid,
         "All rate-limit permit counts and windows must be positive.")
     .ValidateOnStart();
 
@@ -153,10 +154,14 @@ builder.Services.AddRateLimiter(options =>
         context => $"subject:{context.User.FindFirstValue("sub") ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}");
     AddFixedWindowPolicy(options, "agent-heartbeat", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.AgentHeartbeat,
         context => $"agent:{context.User.FindFirstValue("agent_id") ?? "unknown"}");
-    AddFixedWindowPolicy(options, "agent-documents", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.AgentDocuments,
+    AddFixedWindowPolicy(options, "agent-document-status", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.AgentDocumentStatus,
         context => $"agent:{context.User.FindFirstValue("agent_id") ?? "unknown"}");
     AddFixedWindowPolicy(options, "platform-agent-management", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.PlatformAgentManagement,
         context => $"admin:{context.User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? "unknown"}");
+    AddFixedWindowPolicy(options, "platform-documents", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.PlatformDocuments,
+        context => $"admin:{context.User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? "unknown"}");
+    AddFixedWindowPolicy(options, "tenant-documents", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.TenantDocuments,
+        context => $"subject:{context.User.FindFirstValue("sub") ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}");
 });
 
 builder.Services.AddControllers();

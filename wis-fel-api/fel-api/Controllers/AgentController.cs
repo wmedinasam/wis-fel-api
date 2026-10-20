@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
-using System.Text.Json;
+using fel_api.Domain.Documents;
 using fel_api.Domain.Subscriptions;
 using fel_api.Services.Agents;
 using fel_api.Services.Auth;
@@ -17,7 +17,7 @@ public sealed class AgentController(
     AgentHandshakeService handshakeService,
     AgentHeartbeatService heartbeatService,
     RefreshTokenService refreshTokenService,
-    DocumentSubmissionService documentSubmissionService) : ControllerBase
+    DocumentStatusService documentStatusService) : ControllerBase
 {
     [HttpPost("handshake")]
     [AllowAnonymous]
@@ -97,13 +97,11 @@ public sealed class AgentController(
         }
     }
 
-    [HttpPost("documents")]
+    [HttpPost("documents/status")]
     [Authorize(Policy = "Agent")]
-    [EnableRateLimiting("agent-documents")]
-    public async Task<IActionResult> SubmitDocument(
-        [FromBody] JsonElement payload,
-        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
-        [FromHeader(Name = "X-Branch-Id")] Guid? branchId,
+    [EnableRateLimiting("agent-document-status")]
+    public async Task<ActionResult<DocumentStatusReportResult>> ReportDocumentStatus(
+        [FromBody] DocumentStatusBatchRequest request,
         CancellationToken cancellationToken)
     {
         if (!Guid.TryParse(User.FindFirstValue("agent_id"), out var agentId))
@@ -113,45 +111,23 @@ public sealed class AgentController(
 
         try
         {
-            var result = await documentSubmissionService.SubmitAsync(
+            var result = await documentStatusService.ReportAsync(
                 agentId,
-                idempotencyKey,
-                branchId,
-                payload,
+                request.Documents.Select(x => new DocumentStatusReport(
+                    x.IdempotencyKey,
+                    x.BranchId,
+                    x.DocumentType,
+                    x.Series,
+                    x.Number,
+                    x.Status!.Value,
+                    x.AuthorizationNumber,
+                    x.ErrorCode,
+                    x.ErrorMessage,
+                    x.AttemptCount,
+                    x.IssuedAtUtc!.Value,
+                    x.CertifiedAtUtc)).ToArray(),
                 cancellationToken);
-            return StatusCode(result.HttpStatusCode, new
-            {
-                result.DocumentId,
-                result.Delivered
-            });
-        }
-        catch (CertifierRequestMapperNotConfiguredException exception)
-        {
-            var problem = new ProblemDetails
-            {
-                Title = "Certifier request mapping is not configured",
-                Detail = "The request was stored but was not sent to the certifier.",
-                Status = StatusCodes.Status503ServiceUnavailable
-            };
-            problem.Extensions["documentId"] = exception.DocumentId;
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, problem);
-        }
-        catch (DuplicateDocumentSubmissionException)
-        {
-            return Conflict(new ProblemDetails
-            {
-                Title = "Duplicate document submission",
-                Detail = "The Idempotency-Key has already been used by this tenant.",
-                Status = StatusCodes.Status409Conflict
-            });
-        }
-        catch (AgentBranchNotFoundException)
-        {
-            return BadRequest(new ProblemDetails
-            {
-                Title = "Branch is outside the Agent company",
-                Status = StatusCodes.Status400BadRequest
-            });
+            return Ok(result);
         }
         catch (AgentLicenseInvalidException)
         {
@@ -211,4 +187,46 @@ public sealed class AgentHeartbeatRequest
     public string WorkerVersion { get; init; } = string.Empty;
 
     public IReadOnlyCollection<Guid>? AcknowledgedCommandIds { get; init; }
+}
+public sealed class DocumentStatusBatchRequest
+{
+    [Required, MinLength(1), MaxLength(100)]
+    public IReadOnlyList<DocumentStatusItemRequest> Documents { get; init; } = [];
+}
+
+public sealed class DocumentStatusItemRequest
+{
+    [Required, StringLength(200, MinimumLength = 1)]
+    public string IdempotencyKey { get; init; } = string.Empty;
+
+    public Guid? BranchId { get; init; }
+
+    [Required, StringLength(20, MinimumLength = 1)]
+    public string DocumentType { get; init; } = string.Empty;
+
+    [StringLength(50)]
+    public string? Series { get; init; }
+
+    [StringLength(50)]
+    public string? Number { get; init; }
+
+    [Required]
+    public DocumentStatus? Status { get; init; }
+
+    [StringLength(100)]
+    public string? AuthorizationNumber { get; init; }
+
+    [StringLength(100)]
+    public string? ErrorCode { get; init; }
+
+    [StringLength(4000)]
+    public string? ErrorMessage { get; init; }
+
+    [Range(0, int.MaxValue)]
+    public int AttemptCount { get; init; }
+
+    [Required]
+    public DateTimeOffset? IssuedAtUtc { get; init; }
+
+    public DateTimeOffset? CertifiedAtUtc { get; init; }
 }
