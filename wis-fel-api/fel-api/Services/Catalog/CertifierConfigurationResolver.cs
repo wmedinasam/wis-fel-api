@@ -8,9 +8,13 @@ public sealed record ResolvedCertifierConfiguration(
     string CertifierCode,
     string CountryCode,
     string EndpointUrl,
-    CertifierRequestFormat RequestFormat);
+    CertifierRequestFormat RequestFormat,
+    bool UseProduction,
+    IReadOnlyDictionary<string, string> Credentials);
 
-public sealed class CertifierConfigurationResolver(FelApiDbContext dbContext)
+public sealed class CertifierConfigurationResolver(
+    FelApiDbContext dbContext,
+    CertifierCredentialProtector credentialProtector)
 {
     public async Task<ResolvedCertifierConfiguration> ResolveForCompanyAsync(
         Guid companyId,
@@ -34,6 +38,8 @@ public sealed class CertifierConfigurationResolver(FelApiDbContext dbContext)
             .Select(x => new
             {
                 x.CountryCode,
+                x.UseProduction,
+                x.CredentialsEncrypted,
                 x.CertifierCountryConfiguration.EndpointUrl,
                 x.CertifierCountryConfiguration.RequestFormat,
                 x.CertifierCountryConfiguration.IsActive,
@@ -65,6 +71,10 @@ public sealed class CertifierConfigurationResolver(FelApiDbContext dbContext)
             configuration.Code,
             configuration.CountryCode,
             configuration.EndpointUrl,
-            configuration.RequestFormat);
+            configuration.RequestFormat,
+            configuration.UseProduction,
+            configuration.CredentialsEncrypted is null
+                ? new Dictionary<string, string>()
+                : credentialProtector.Unprotect(configuration.CredentialsEncrypted));
     }
 }

@@ -34,6 +34,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                 ["ClientJwt:Audience"] = "",
                 ["ClientJwt:RequireHttpsMetadata"] = "true",
                 ["DevelopmentSeed:Enabled"] = "false",
+                ["DataProtection:KeyRingPath"] = Path.Combine(Path.GetTempPath(), "wis-fel-api-tests", _databaseName),
                 ["RateLimiting:PlatformLogin:PermitLimit"] = "2",
                 ["RateLimiting:PlatformLogin:WindowSeconds"] = "60"
             });

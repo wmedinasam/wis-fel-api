@@ -1,9 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using fel_api.Domain.Catalog;
 using fel_api.Domain.Documents;
 using fel_api.Domain.Subscriptions;
 using fel_api.Services.Agents;
 using fel_api.Services.Auth;
+using fel_api.Services.Catalog;
 using fel_api.Services.Documents;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +20,9 @@ public sealed class AgentController(
     AgentHandshakeService handshakeService,
     AgentHeartbeatService heartbeatService,
     RefreshTokenService refreshTokenService,
-    DocumentStatusService documentStatusService) : ControllerBase
+    DocumentStatusService documentStatusService,
+    AgentLicenseValidator licenseValidator,
+    CertifierConfigurationResolver certifierConfigurationResolver) : ControllerBase
 {
     [HttpPost("handshake")]
     [AllowAnonymous]
@@ -94,6 +99,66 @@ public sealed class AgentController(
         catch (KeyNotFoundException)
         {
             return Unauthorized();
+        }
+    }
+
+    [HttpGet("certifier-configuration")]
+    [Authorize(Policy = "Agent")]
+    [EnableRateLimiting("agent-configuration")]
+    public async Task<ActionResult<AgentCertifierConfigurationResponse>> GetCertifierConfiguration(
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue("tenant_id"), out var tenantId)
+            || !Guid.TryParse(User.FindFirstValue("company_id"), out var companyId))
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            await licenseValidator.ValidateAsync(tenantId, cancellationToken);
+            var configuration = await certifierConfigurationResolver.ResolveForCompanyAsync(
+                tenantId,
+                companyId,
+                cancellationToken);
+            return Ok(new AgentCertifierConfigurationResponse(
+                configuration.CertifierCode,
+                configuration.CountryCode,
+                configuration.EndpointUrl,
+                configuration.RequestFormat,
+                configuration.UseProduction,
+                configuration.Credentials));
+        }
+        catch (AgentLicenseInvalidException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Title = "Agent license is not valid",
+                Detail = exception.Message,
+                Status = StatusCodes.Status403Forbidden
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new ProblemDetails
+            {
+                Title = "Certifier configuration is not usable",
+                Detail = exception.Message,
+                Status = StatusCodes.Status409Conflict
+            });
+        }
+        catch (CryptographicException)
+        {
+            // Las credenciales se cifran con el key ring de Data Protection: si se perdió, no hay forma de recuperarlas.
+            return StatusCode(StatusCodes.Status500InternalServerError, new ProblemDetails
+            {
+                Title = "Certifier credentials could not be decrypted",
+                Status = StatusCodes.Status500InternalServerError
+            });
         }
     }
 
@@ -174,6 +239,14 @@ public sealed record AgentHandshakeResponse(
         result.TenantId,
         result.CompanyId);
 }
+
+public sealed record AgentCertifierConfigurationResponse(
+    string CertifierCode,
+    string CountryCode,
+    string EndpointUrl,
+    CertifierRequestFormat RequestFormat,
+    bool UseProduction,
+    IReadOnlyDictionary<string, string> Credentials);
 
 public sealed class AgentRefreshRequest
 {

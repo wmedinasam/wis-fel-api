@@ -12,6 +12,7 @@ using fel_api.Services.Catalog;
 using fel_api.Services.Documents;
 using fel_api.Services.Subscriptions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -32,6 +33,20 @@ if (string.IsNullOrWhiteSpace(connectionString))
 }
 
 builder.Services.AddDbContext<FelApiDbContext>(options => options.UseSqlServer(connectionString));
+
+var keyRingPath = builder.Configuration["DataProtection:KeyRingPath"];
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName("wis-fel-api");
+if (!string.IsNullOrWhiteSpace(keyRingPath))
+{
+    // shortcut: key ring en disco sin cifrar; mover a Key Vault o a un certificado cuando el despliegue lo permita.
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
+}
+else if (!builder.Environment.IsDevelopment())
+{
+    throw new InvalidOperationException(
+        "DataProtection:KeyRingPath is required outside Development: without a persisted key ring the stored certifier credentials cannot be decrypted after a restart.");
+}
+
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IPasswordHasher<UserAccount>, PasswordHasher<UserAccount>>();
 builder.Services.AddScoped<JwtTokenIssuer>();
@@ -47,6 +62,8 @@ builder.Services.AddScoped<DocumentStatusService>();
 builder.Services.AddScoped<DocumentQueryService>();
 builder.Services.AddScoped<TenantQuotaValidator>();
 builder.Services.AddScoped<CertifierConfigurationResolver>();
+builder.Services.AddSingleton<CertifierCredentialProtector>();
+builder.Services.AddScoped<CertifierCredentialService>();
 
 builder.Services.AddOptions<JwtOptions>()
     .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
@@ -77,6 +94,7 @@ builder.Services.AddOptions<RateLimitOptions>()
         && options.ClientMe.IsValid
         && options.AgentHeartbeat.IsValid
         && options.AgentDocumentStatus.IsValid
+        && options.AgentConfiguration.IsValid
         && options.PlatformAgentManagement.IsValid
         && options.PlatformDocuments.IsValid
         && options.TenantDocuments.IsValid,
@@ -155,6 +173,8 @@ builder.Services.AddRateLimiter(options =>
     AddFixedWindowPolicy(options, "agent-heartbeat", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.AgentHeartbeat,
         context => $"agent:{context.User.FindFirstValue("agent_id") ?? "unknown"}");
     AddFixedWindowPolicy(options, "agent-document-status", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.AgentDocumentStatus,
+        context => $"agent:{context.User.FindFirstValue("agent_id") ?? "unknown"}");
+    AddFixedWindowPolicy(options, "agent-configuration", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.AgentConfiguration,
         context => $"agent:{context.User.FindFirstValue("agent_id") ?? "unknown"}");
     AddFixedWindowPolicy(options, "platform-agent-management", context => context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value.PlatformAgentManagement,
         context => $"admin:{context.User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? "unknown"}");

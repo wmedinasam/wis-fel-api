@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Net.Http.Json;
 using fel_api.Auth;
 using fel_api.Data;
@@ -196,6 +197,110 @@ public sealed class AgentApiTests
         Assert.Equal(HttpStatusCode.NoContent, revokeResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task CertifierConfiguration_IsStoredEncryptedAndServedToTheAgent()
+    {
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAgentAsync(factory);
+        await SeedCertifierAssignmentAsync(factory, seeded.Agent.CompanyId);
+        var admin = await SeedUserAsync(factory, isPlatformAdministrator: true);
+        var loginResponse = await client.PostAsJsonAsync("/auth/login", new
+        {
+            Email = admin.Email,
+            Password = "Correct-Horse-2026!"
+        });
+        var adminTokens = await loginResponse.Content.ReadFromJsonAsync<AgentTokenResponse>();
+        Assert.NotNull(adminTokens);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminTokens.AccessToken);
+
+        var putResponse = await client.PutAsJsonAsync(
+            $"/platform/companies/{seeded.Agent.CompanyId}/certifier-credentials",
+            new
+            {
+                Credentials = new Dictionary<string, string> { ["usuario"] = "worker-gt", ["llaveApi"] = "super-secret" },
+                UseProduction = true
+            });
+        Assert.Equal(HttpStatusCode.NoContent, putResponse.StatusCode);
+
+        var handshakeResponse = await client.PostAsJsonAsync("/agent/handshake", new
+        {
+            AgentId = seeded.Agent.Id,
+            Secret = seeded.Secret,
+            WorkerVersion = "1.2.3"
+        });
+        var agentTokens = await handshakeResponse.Content.ReadFromJsonAsync<AgentTokenResponse>();
+        Assert.NotNull(agentTokens);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", agentTokens.AccessToken);
+
+        var configurationResponse = await client.GetAsync("/agent/certifier-configuration");
+
+        Assert.Equal(HttpStatusCode.OK, configurationResponse.StatusCode);
+        var configuration = await configurationResponse.Content.ReadFromJsonAsync<CertifierConfigurationResponse>();
+        Assert.NotNull(configuration);
+        Assert.Equal("INFILE", configuration.CertifierCode);
+        Assert.Equal("GT", configuration.CountryCode);
+        Assert.Equal("https://certifier.example/gt", configuration.EndpointUrl);
+        Assert.Equal(CertifierRequestFormat.Xml, configuration.RequestFormat);
+        Assert.True(configuration.UseProduction);
+        Assert.Equal("worker-gt", configuration.Credentials["usuario"]);
+        Assert.Equal("super-secret", configuration.Credentials["llaveApi"]);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<FelApiDbContext>();
+        var stored = await dbContext.CompanyCertifierAssignments
+            .SingleAsync(x => x.CompanyId == seeded.Agent.CompanyId);
+        Assert.NotNull(stored.CredentialsEncrypted);
+        Assert.DoesNotContain("super-secret", Encoding.UTF8.GetString(stored.CredentialsEncrypted));
+        Assert.Single(await dbContext.AuditLogs
+            .Where(x => x.EventType == "certifier-credentials-updated")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task CertifierConfiguration_ReturnsConflictWhenCompanyHasNoAssignment()
+    {
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        var seeded = await SeedAgentAsync(factory);
+        var handshakeResponse = await client.PostAsJsonAsync("/agent/handshake", new
+        {
+            AgentId = seeded.Agent.Id,
+            Secret = seeded.Secret,
+            WorkerVersion = "1.2.3"
+        });
+        var agentTokens = await handshakeResponse.Content.ReadFromJsonAsync<AgentTokenResponse>();
+        Assert.NotNull(agentTokens);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", agentTokens.AccessToken);
+
+        var configurationResponse = await client.GetAsync("/agent/certifier-configuration");
+
+        Assert.Equal(HttpStatusCode.Conflict, configurationResponse.StatusCode);
+    }
+
+    internal static async Task SeedCertifierAssignmentAsync(ApiFactory factory, Guid companyId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<FelApiDbContext>();
+        var certifier = new Certifier { Code = "INFILE", Name = "Infile" };
+        var configuration = new CertifierCountryConfiguration
+        {
+            CertifierId = certifier.Id,
+            CountryCode = "GT",
+            EndpointUrl = "https://certifier.example/gt",
+            RequestFormat = CertifierRequestFormat.Xml
+        };
+        dbContext.Certifiers.Add(certifier);
+        dbContext.CertifierCountryConfigurations.Add(configuration);
+        dbContext.CompanyCertifierAssignments.Add(new CompanyCertifierAssignment
+        {
+            CompanyId = companyId,
+            CountryCode = "GT",
+            CertifierCountryConfigurationId = configuration.Id
+        });
+        await dbContext.SaveChangesAsync();
+    }
+
     internal static async Task<UserAccount> SeedUserAsync(ApiFactory factory, bool isPlatformAdministrator)
     {
         using var scope = factory.Services.CreateScope();
@@ -279,4 +384,12 @@ public sealed class AgentApiTests
 
     internal sealed record PendingCommandResponse(Guid Id, string Type, string Payload, DateTimeOffset LeaseExpiresAtUtc);
     private sealed record ProvisionedAgentResponse(Guid AgentId, string Secret);
+
+    private sealed record CertifierConfigurationResponse(
+        string CertifierCode,
+        string CountryCode,
+        string EndpointUrl,
+        CertifierRequestFormat RequestFormat,
+        bool UseProduction,
+        IReadOnlyDictionary<string, string> Credentials);
 }
