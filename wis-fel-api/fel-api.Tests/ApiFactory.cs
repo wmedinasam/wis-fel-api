@@ -33,6 +33,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                 ["ClientJwt:Authority"] = "",
                 ["ClientJwt:Audience"] = "",
                 ["ClientJwt:RequireHttpsMetadata"] = "true",
+                ["DevelopmentSeed:Enabled"] = "false",
                 ["RateLimiting:PlatformLogin:PermitLimit"] = "2",
                 ["RateLimiting:PlatformLogin:WindowSeconds"] = "60"
             });

@@ -221,11 +221,13 @@ dotnet ef database update --project wis-fel-api/fel-api
 # 5. Crear el primer administrador de plataforma (pide la contraseña sin eco)
 dotnet run --project wis-fel-api/fel-api -- --bootstrap-platform-admin admin@ejemplo.com
 
-# 6. Levantar la API
+# 6. Levantar la API (en Development carga datos de prueba la primera vez)
 dotnet run --project wis-fel-api/fel-api
 ```
 
 Notas:
+
+- Datos de prueba (`Data/DevelopmentDataSeeder.cs`): se cargan en Development cuando no hay tenants. Crean un tenant con empresas GT y SV, sucursales, agentes, documentos en distintos estados y un usuario restringido a SV. La consola muestra el admin (`admin@fel.local`) y el secreto del agente. Se desactivan con `DevelopmentSeed:Enabled=false`.
 
 - `Jwt:SigningKey` debe ser base64 de al menos 32 bytes. Si falta, la aplicación no arranca.
 - El bootstrap requiere una contraseña de al menos 12 caracteres y solo funciona si no existe ningún administrador de plataforma. Termina sin levantar el servidor web.
@@ -507,13 +509,14 @@ Los tests usan EF Core InMemory, así que no necesitan SQL Server.
 - Una clave de prueba y un límite de login de 2 por minuto.
 - Una clave simétrica local para `ClientJwt`, que reemplaza al IdP externo y permite probar los endpoints de tenant.
 
-Cobertura actual (19 tests):
+Cobertura actual (20 tests):
 
 - `AgentApiTests` (7): login solo para administradores, `/auth/me`, rate limit de login, handshake y heartbeat con comando, rotación de refresh tokens y rechazo de reuso, provisionamiento y revocación.
 - `DocumentApiTests` (3):
   - Upsert del estado y rechazo de una sucursal ajena.
   - Filtro por estado y reenvío desde plataforma, con el comando entregado en el heartbeat y 409 para `Certified` y para un reenvío duplicado.
   - Alcance de tenant por membresía y por empresas de los roles.
+- `DevelopmentSeedTests` (1): el seed es idempotente y los GET de plataforma y tenant devuelven los datos.
 - `SubscriptionStateCalculatorTests` (3), `TenantQuotaValidatorTests` (4), `CertifierConfigurationResolverTests` (1), `ClientProfileServiceTests` (1).
 
 ---

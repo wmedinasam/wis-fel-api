@@ -191,6 +191,15 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("DevelopmentSeed:Enabled"))
+{
+    await using var seedScope = app.Services.CreateAsyncScope();
+    await DevelopmentDataSeeder.SeedAsync(
+        seedScope.ServiceProvider.GetRequiredService<FelApiDbContext>(),
+        seedScope.ServiceProvider.GetRequiredService<IPasswordHasher<UserAccount>>(),
+        app.Configuration["ClientJwt:Authority"]);
+}
+
 if (args.Length == 2 && args[0] == "--bootstrap-platform-admin")
 {
     var password = ConsoleSecretReader.Read("New platform admin password: ");

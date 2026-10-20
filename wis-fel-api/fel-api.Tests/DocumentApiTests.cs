@@ -216,7 +216,7 @@ public sealed class DocumentApiTests
         return otherCompany.Id;
     }
 
-    private static string ClientToken(string subject) => new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+    internal static string ClientToken(string subject) => new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
         ApiFactory.ClientIssuer,
         ApiFactory.ClientAudience,
         [new Claim("sub", subject)],
