@@ -48,6 +48,18 @@ namespace fel_api.Data.Migrations
                     b.Property<DateTimeOffset?>("LastHeartbeatAtUtc")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("MachineHostname")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("MachineId")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("MachineOs")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(160)
@@ -161,6 +173,57 @@ namespace fel_api.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_RefreshTokens_ExactlyOneOwner", "([AgentId] IS NOT NULL AND [UserAccountId] IS NULL) OR ([AgentId] IS NULL AND [UserAccountId] IS NOT NULL)");
                         });
+                });
+
+            modelBuilder.Entity("fel_api.Domain.Audit.AuditLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid?>("AgentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("nvarchar(45)");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ResourceId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ResourceType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("UserAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceType", "ResourceId")
+                        .HasDatabaseName("IX_AuditLog_ResourceType_ResourceId");
+
+                    b.HasIndex("TenantId", "OccurredAtUtc")
+                        .HasDatabaseName("IX_AuditLog_TenantId_OccurredAtUtc");
+
+                    b.ToTable("AuditLog", (string)null);
                 });
 
             modelBuilder.Entity("fel_api.Domain.Catalog.Branch", b =>
@@ -277,6 +340,11 @@ namespace fel_api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nchar(3)")
+                        .IsFixedLength();
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -287,8 +355,16 @@ namespace fel_api.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<string>("TaxId")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Timezone")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
 
@@ -317,6 +393,14 @@ namespace fel_api.Data.Migrations
                         .HasMaxLength(2)
                         .HasColumnType("nchar(2)")
                         .IsFixedLength();
+
+                    b.Property<byte[]>("CredentialsEncrypted")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<bool>("UseProduction")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.HasKey("CompanyId");
 
@@ -414,6 +498,43 @@ namespace fel_api.Data.Migrations
                     b.HasIndex("TenantId", "CompanyId", "BranchId");
 
                     b.ToTable("Documents", (string)null);
+                });
+
+            modelBuilder.Entity("fel_api.Domain.Identity.ActivationCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("UsedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UsedByAgentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CodeHash")
+                        .IsUnique();
+
+                    b.ToTable("ActivationCodes", (string)null);
                 });
 
             modelBuilder.Entity("fel_api.Domain.Identity.ExternalUserIdentity", b =>
@@ -590,6 +711,15 @@ namespace fel_api.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.PrimitiveCollection<string>("AllowedCountries")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("BillingCycle")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<int>("GracePeriodDays")
                         .HasColumnType("int");

@@ -1,59 +1,197 @@
-# Project Instructions
+# Plan: Plataforma de Facturación Electrónica Centralizada Multi País
 
-## Current project
+## 1. Objetivo
 
-- This repository contains an ASP.NET Core Web API solution at `wis-fel-api/wis-fel-api.slnx`. The app is `wis-fel-api/fel-api` and targets .NET 10.
-- The app registers controllers, OpenAPI, EF Core SQL Server, local JWT auth for platform/Agents, external JWT validation for clients, rate limiting, and domain services. Worker/auth endpoints are under `fel-api/Controllers`; Agent, subscription, catalog, identity, and document entities are under `fel-api/Domain`.
-- `/auth/login` and `/auth/refresh` are for platform administrators only. `GET /auth/me` accepts the configured external client JWT scheme. `/agent/handshake` validates a provisioned Agent secret and issues worker tokens; `/agent/token/refresh`, `/agent/heartbeat`, and `/agent/documents` are worker routes. `/platform/agents` provisions/revokes Agents and requires a platform-admin JWT.
-- `ClientJwt:Authority` and `ClientJwt:Audience` must be configured for the portal's identity provider before client `/auth/me` tokens can validate. Client JWT `iss`+`sub` must map to `ExternalUserIdentities`.
-- JWT signing key is required via User Secrets in Development or deployment secret configuration in Production. Bootstrap the first platform administrator with `dotnet run --project wis-fel-api/fel-api/fel-api.csproj --launch-profile http -- --bootstrap-platform-admin <email>`; the password is prompted without echo. There is no public admin-registration route.
-- The physical document table is `Documents` and delivery history is `DocumentDeliveryAttempts`. No certifier request mappers are registered yet: `/agent/documents` stores the incoming JSON but returns `503` without sending it until a mapper exists for the configured certifier, country, and format.
-- OpenAPI UI and its document are enabled only in Development. Preserve that boundary unless the deployment requirements explicitly change.
+Plataforma centralizada de licencias y administración para un servicio de facturación electrónica multi país. Los clientes ejecutan un **Worker** local que certifica documentos con el certificador de cada país; un **Portal** web centraliza licencias, planes, empresas y usuarios.
 
-## Product direction and open requirements
+## 2. Principios
 
-The API receives JSON submissions from worker services running on multiple PCs. It uses portal-managed tenant, company, country, and certifier settings to select the certifier-specific JSON or XML request and send it to a configured certifier endpoint. The agreed submission flow is synchronous.
+- Tecnologías ejecutables y desarrollables desde cualquier S.O. (Windows, Linux, macOS).
+- Licencias centralizadas.
+- Aislamiento total por tenant (cliente).
+- Agregar un país o certificador nuevo sin tocar el núcleo.
 
-- Treat the incoming payload shape as undecided. Do not invent a final schema, required fields, version policy, or unknown-field behavior; make those decisions explicit and confirm them before they constrain clients.
-- Client and tenant are the same concept. Each company belongs to one tenant, has one country, and its branches inherit that country.
-- A user identity is globally unique by normalized email and may have platform-administrator membership and tenant memberships. Tenant roles grant access to explicitly assigned companies; preserve tenant boundaries in queries and foreign keys.
-- Subscription plans define maximum companies, branches (total per tenant), users, and a configurable pre-expiration grace period. Subscription state is derived from subscription dates and plan settings; reject resource creation when its quota is reached or the subscription is suspended.
-- A company has at most one certifier assignment. Certifier configuration is unique by certifier and country because the same certifier can behave differently by country.
-- Persist incoming document payloads and outbound delivery attempts in SQL Server without inventing payload fields or status semantics. The exact payload contract and retention policy remain undecided; do not add automatic document deletion until retention is defined.
-- The documents endpoint accepts optional `Idempotency-Key`; absent keys are generated server-side. A repeated supplied key in the same tenant returns `409`; it does not replay a prior response. Do not promise ordering, retry, deduplication, or delivery guarantees beyond implemented and tested behavior.
-- Agents are provisioned per company and tenant. `MaxAgents` is a distinct subscription-plan quota. Handshake/document access is allowed in `Active` and `Grace`, and denied for suspended subscriptions or inactive Agents.
-- SQL Server is the configured persistence provider, and the initial database is `FEL_API`. Do not assume credential storage for certifier integrations beyond the established database/configuration boundaries.
+## 3. Stack
 
-## Implementation guidance
+| Componente | Tecnología |
+|---|---|
+| Frontend (portal cliente y admin) | React |
+| API | ASP.NET Core (.NET 10) |
+| Base de datos central | PostgreSQL |
+| Worker cliente | .NET 10 Worker Service (C#) |
+| Cola local del worker | MS SQL Server |
+| Identidad | ASP.NET Core Identity + JWT |
+| Resiliencia | Polly |
 
-- Keep HTTP controllers focused on transport concerns. Put validation, routing decisions, country/certifier mappings, and outbound delivery behind testable application services.
-- Keep tenant ownership explicit in relationships and queries. Use composite foreign keys where needed so roles, company grants, branches, and submissions cannot cross tenants.
-- Keep certifier- and country-specific request construction isolated so adding a format or integration does not spread conditional logic through controllers. Serialize to the exact JSON/XML contract required by the selected certifier.
-- Resolve the destination and format from validated portal-managed configuration; do not let worker payloads select arbitrary outbound URLs or override trusted integration settings.
-- Worker JWT authentication, hashed Agent credentials/refresh tokens, and configurable rate-limit policies are implemented. Continue to treat client identity-provider setup, outbound DNS/private-network allow-listing, retry safety, idempotency replay semantics, retention, and sensitive-data handling as requirements to define; never log credentials, certificates, or full submitted documents by default.
-- Add focused tests for request validation, configuration-based routing, JSON/XML mapping, and delivery failure behavior as those capabilities are introduced. Do not claim delivery guarantees that tests and implementation do not establish.
-- Follow the existing ASP.NET Core and nullable-reference-type conventions. Keep package versions centrally managed in `wis-fel-api/Directory.Packages.props`.
-- Configure SQL Server through `ConnectionStrings:FelApi`; use User Secrets for local Development and environment/deployment secret configuration for Production. Never commit connection credentials.
-- JWT settings live under `Jwt`; keep `Jwt:SigningKey` out of tracked settings. Rate-limit defaults live under `RateLimiting` in `appsettings.json` and can be overridden per environment. Tune initial values against real traffic before production.
-- Create or update the database only through EF Core migrations. Do not call `EnsureCreated` or apply migrations automatically at application startup. Keep the initial model free of placeholder business entities; EF's `__EFMigrationsHistory` table is expected.
-- Run production migrations as an explicit deployment step using an identity authorized to create/update the database, rather than granting those permissions to the API's normal runtime identity.
+## 4. Repositorios
 
-## Build and run
+- **Repo portal web:** React + API. (este REPO)
+- **Repo worker service:** Worker .NET 10.
+- **Recomendado:** repo/paquete tercero de **contratos compartidos** (DTOs, modelo canónico `Documento` aún no definida la arquitectura).
 
-Run from the repository root:
+## 5. Arquitectura general
 
-```sh
-dotnet restore wis-fel-api/wis-fel-api.slnx
-dotnet tool restore
-dotnet build wis-fel-api/wis-fel-api.slnx
-dotnet run --project wis-fel-api/fel-api/fel-api.csproj --launch-profile http
+```
+[Portal Cliente]   [Portal Admin]
+        \             /
+         [ API ASP.NET Core ] ---- [ PostgreSQL ]
+                |
+          HTTPS + JWT
+                |
+        [ Worker (por tenant) ]
+          |  cola SQLite
+          |  providers por país/certificador
+          v
+   [ Certificadores: INFILE GT / SV / RD, otros ]
 ```
 
-Add and apply migrations from the repository root, targeting the API project:
+## 6. Modelo de datos (alto nivel)
 
-```sh
-dotnet tool run dotnet-ef migrations add <MigrationName> --project wis-fel-api/fel-api/fel-api.csproj --startup-project wis-fel-api/fel-api/fel-api.csproj
-dotnet tool run dotnet-ef database update --project wis-fel-api/fel-api/fel-api.csproj --startup-project wis-fel-api/fel-api/fel-api.csproj
-```
+- `tenants` (cliente) → `companies` (empresa) → `branches` (sucursal).
+- `plans`: `tipo` (mensual / anual / lifetime), `max_empresas`, `max_sucursales_por_empresa`, opcional `paises_permitidos`.
+- `subscriptions`: tenant, plan, fechas, estado.
+- `companies`: `pais`, `certificador_id`, identificación fiscal (NIT, etc.), moneda, huso horario.
+- `certificadores`: catálogo (INFILE, otros).
+- `company_certifier_config`: credenciales cifradas, URLs, modo pruebas/producción.
+- `users`, `roles`, `user_roles`.
+- `instances` (workers activos), `activation_codes`.
+- `audit_log`.
+- `company_id` en documentos, series y correlativos.
 
-Run focused tests with `dotnet test wis-fel-api/wis-fel-api.slnx`. The test project is `wis-fel-api/fel-api.Tests`.
+## 7. Multi tenant
+
+- `tenant_id` en todas las tablas + **Row Level Security** de PostgreSQL.
+- El `tenant_id` se toma siempre del token, nunca del request.
+
+## 8. Planes y licenciamiento
+
+### 8.1 Planes
+
+- Mensual, anual o lifetime (lifetime sin vencimiento del plan).
+- Cada plan incluye un número de empresas y de sucursales por empresa.
+  - Ejemplo: plan básico = 1 empresa, 1 sucursal.
+- **Upgrade:** se cambia el plan en `subscriptions`; los límites aplican de inmediato.
+- Prorrateo solo para mensual/anual (pagos: fuera de alcance por ahora).
+- La API rechaza crear empresas o sucursales sobre el límite.
+
+### 8.2 Activación del worker
+
+1. El cliente crea la empresa/sucursal en el portal.
+2. El portal genera un **código de activación** de un solo uso con vencimiento corto.
+3. El worker lo recibe en el primer arranque (archivo de configuración o variable de entorno).
+4. El worker envía el código + **huella de máquina** (hostname, ID de máquina, SO).
+5. La API valida, registra la instancia y responde con JWT de licencia, refresh token y configuración inicial.
+6. El worker guarda los tokens cifrados (DPAPI en Windows, Keychain en macOS, archivo con clave derivada en Linux).
+
+### 8.3 JWT de licencia
+
+- Firma **RS256**: clave privada en la API, clave pública en el worker.
+- Claims: `tenant_id`, `plan`, `max_empresas`, `max_sucursales`, `vence`, `instance_id`.
+- Vigencia corta (24 a 72 h), renovada automáticamente con el refresh token.
+- Lifetime: el plan no vence, pero el JWT se sigue renovando.
+
+### 8.4 Renovación y gracia
+
+- Sin conexión, el worker opera dentro de un **periodo de gracia** (ej. 1 día).
+- Pasada la gracia, se bloquea la certificación y se avisa.
+- Plan vencido o suspendido: la API deja de renovar.
+
+### 8.5 Control y revocación
+
+- El plan limita el número de instancias activas.
+- Los límites de empresas/sucursales se validan en la API y en el worker (según JWT).
+- Upgrade: el siguiente JWT trae los nuevos límites, o se fuerza vía SignalR.
+- Admin puede revocar una instancia o cambiar su huella (migración de equipo).
+- Heartbeat periódico (estado y versión del worker).
+- Si dos equipos usan el mismo `instance_id`, la API lo detecta y bloquea.
+- Auditoría de activaciones y renovaciones.
+
+## 9. Portales
+
+### 9.1 Portal cliente
+
+- Gestión de sus empresas, sucursales, país y certificador.
+- Usuarios y roles propios.
+- Solo ve su tenant.
+
+### 9.2 Portal administrador
+
+- Ver y editar información de todos los clientes, empresas, planes, instancias y usuarios.
+- Suplantación de tenant con registro de auditoría.
+- 2FA obligatorio.
+
+### 9.3 Roles
+
+- **Plataforma:** `SuperAdmin`, `Soporte` (solo lectura).
+- **Cliente:** `Owner`, `Admin`, `Usuario`, `SoloLectura`.
+
+### 9.4 API
+
+- Una sola API con `/api/admin/*` y `/api/tenant/*`.
+- Dos apps React (rutas separadas o dos builds).
+
+## 10. Worker
+
+### 10.1 Multi país y multi certificador
+
+- País y certificador se definen a nivel de **empresa**, no de tenant.
+- Un cliente con central en GT puede tener empresas en SV o RD, cada una con un certificador distinto.
+- Un worker por tenant atiende varias empresas de distintos países.
+- Por documento: lee `company_id` → resuelve `país + certificador` → elige el provider.
+
+### 10.2 Diseño (Strategy + Factory)
+
+- **Modelo canónico:** `Documento` interno, neutral al país y al certificador.
+- `ICertificadorProvider.CertificarAsync(Documento)`.
+- Implementaciones por certificador y país: `InfileGtProvider` (XML), `InfileSvProvider` (JSON), `InfileRdProvider`, etc.
+- `IDocumentSerializer` separado: XML con `XDocument`/`XmlWriter` (GT), JSON con `System.Text.Json` (otros países).
+- `IProviderFactory` con clave `país + certificador` vía keyed services de .NET 10.
+- **Estrategia fiscal por país** (aparte del certificador): impuestos (IVA/ITBIS), tipos de documento, numeración, moneda y huso horario.
+- Agregar un país = una clase nueva, sin tocar el núcleo.
+- Credenciales por empresa descargadas de la API y guardadas cifradas, nunca en texto plano.
+
+### 10.3 Cola local (outbox)
+
+- SQLite (multiplataforma).
+- Estados: `Pendiente → Procesando → Certificado | Error | Reintentar`.
+- Cola con `company_id` para aislar errores y reintentos por empresa.
+- Flujo: documento entra a la cola → certificación → resultado guardado local → sincronización con la API.
+
+### 10.4 Comunicación con la API
+
+- **Pull:** configuración y licencia cada X minutos (HTTPS + JWT).
+- **Push:** resultados y estado en lotes.
+- Opcional: SignalR para avisos en tiempo real, con polling como respaldo.
+- **Idempotencia:** `idempotency_key` por documento.
+
+### 10.5 Fallos, timeouts y conexión
+
+- Timeout corto por petición (15 a 30 s) con `HttpClient` + Polly.
+- Reintentos con backoff exponencial y jitter (5 s, 15 s, 1 min, 5 min...).
+- Circuit breaker tras varios fallos consecutivos.
+- **Modo offline:** el worker sigue certificando con el certificador (no depende de la API); resultados pendientes quedan en SQLite y se sincronizan al volver la conexión.
+- Licencia: periodo de gracia sin conexión.
+- Timeout con el certificador: antes de reintentar, consultar si el documento ya fue certificado para evitar duplicados.
+- **Dead-letter:** tras N intentos pasa a `Error` y se alerta en el portal.
+- **Heartbeat** para ver en el admin qué workers están desconectados.
+
+## 11. Seguridad
+
+- HTTPS siempre; certificate pinning opcional.
+- Validación real de licencia en la API (ofuscar el worker aporta poco).
+- 2FA para admins.
+- Credenciales de certificadores cifradas.
+- Auditoría completa.
+
+## 12. Fuera de alcance por ahora
+
+- Pagos y pasarela (Stripe u otra).
+
+## 13. Siguientes pasos
+
+1. Modelo de datos completo (DDL PostgreSQL + RLS).
+2. Estructura de los repos y proyecto de contratos compartidos.
+3. Esqueleto de la API (identidad, tenants, planes, activación).
+4. Esqueleto del Worker (cola SQLite, providers, activación).
+5. Primer provider: INFILE GT (XML).
+6. Portal admin y portal cliente (React).

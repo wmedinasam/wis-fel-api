@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using fel_api.Domain.Agents;
+using fel_api.Domain.Audit;
 using fel_api.Domain.Catalog;
 using fel_api.Domain.Documents;
 using fel_api.Domain.Identity;
@@ -28,8 +29,10 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 	public DbSet<Certifier> Certifiers => Set<Certifier>();
 	public DbSet<CertifierCountryConfiguration> CertifierCountryConfigurations => Set<CertifierCountryConfiguration>();
 	public DbSet<CompanyCertifierAssignment> CompanyCertifierAssignments => Set<CompanyCertifierAssignment>();
+	public DbSet<ActivationCode> ActivationCodes => Set<ActivationCode>();
 	public DbSet<DocumentSubmission> DocumentSubmissions => Set<DocumentSubmission>();
 	public DbSet<DocumentDeliveryAttempt> DocumentDeliveryAttempts => Set<DocumentDeliveryAttempt>();
+	public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
 	protected override void OnModelCreating(ModelBuilder modelBuilder)
 	{
@@ -45,6 +48,9 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 			entity.Property(x => x.Name).HasMaxLength(160).IsRequired();
 			entity.Property(x => x.NormalizedName).HasMaxLength(160).IsRequired();
 			entity.Property(x => x.CredentialHash).HasMaxLength(64).IsRequired();
+			entity.Property(x => x.MachineHostname).HasMaxLength(255);
+			entity.Property(x => x.MachineId).HasMaxLength(255);
+			entity.Property(x => x.MachineOs).HasMaxLength(100);
 			entity.Property(x => x.WorkerVersion).HasMaxLength(80);
 			entity.HasIndex(x => new { x.TenantId, x.CompanyId, x.NormalizedName }).IsUnique();
 			entity.HasOne(x => x.Company)
@@ -198,6 +204,8 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 			entity.HasKey(x => x.Id);
 			entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
 			entity.Property(x => x.NormalizedName).HasMaxLength(100).IsRequired();
+			entity.Property(x => x.BillingCycle).HasConversion<string>().HasMaxLength(20).IsRequired();
+			entity.Property(x => x.AllowedCountries).HasColumnType("nvarchar(max)");
 			entity.Property(x => x.MaxAgents).HasDefaultValue(1);
 			entity.HasIndex(x => x.NormalizedName).IsUnique();
 		});
@@ -232,6 +240,9 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 			entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
 			entity.Property(x => x.NormalizedName).HasMaxLength(200).IsRequired();
 			entity.Property(x => x.CountryCode).HasMaxLength(2).IsFixedLength().IsRequired();
+			entity.Property(x => x.TaxId).HasMaxLength(50);
+			entity.Property(x => x.CurrencyCode).HasMaxLength(3).IsFixedLength();
+			entity.Property(x => x.Timezone).HasMaxLength(100);
 			entity.HasIndex(x => new { x.TenantId, x.NormalizedName }).IsUnique();
 			entity.HasOne(x => x.Tenant)
 				.WithMany()
@@ -285,6 +296,8 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 			entity.ToTable("CompanyCertifierAssignments");
 			entity.HasKey(x => x.CompanyId);
 			entity.Property(x => x.CountryCode).HasMaxLength(2).IsFixedLength().IsRequired();
+			entity.Property(x => x.CredentialsEncrypted).HasColumnType("varbinary(max)");
+			entity.Property(x => x.UseProduction).HasDefaultValue(false);
 			entity.HasOne(x => x.Company)
 				.WithOne()
 				.HasForeignKey<CompanyCertifierAssignment>(x => new { x.CompanyId, x.CountryCode })
@@ -335,6 +348,28 @@ public sealed class FelApiDbContext(DbContextOptions<FelApiDbContext> options) :
 				.WithMany()
 				.HasForeignKey(x => x.DocumentSubmissionId)
 				.OnDelete(DeleteBehavior.Restrict);
+		});
+
+		modelBuilder.Entity<ActivationCode>(entity =>
+		{
+			entity.ToTable("ActivationCodes");
+			entity.HasKey(x => x.Id);
+			entity.Property(x => x.CodeHash).HasMaxLength(128).IsRequired();
+			entity.Property(x => x.UsedByAgentId);
+			entity.HasIndex(x => x.CodeHash).IsUnique();
+		});
+
+		modelBuilder.Entity<AuditLog>(entity =>
+		{
+			entity.ToTable("AuditLog");
+			entity.HasKey(x => x.Id);
+			entity.Property(x => x.EventType).HasMaxLength(100).IsRequired();
+			entity.Property(x => x.ResourceType).HasMaxLength(100);
+			entity.Property(x => x.ResourceId).HasMaxLength(200);
+			entity.Property(x => x.IpAddress).HasMaxLength(45);
+			entity.Property(x => x.Details).HasColumnType("nvarchar(max)");
+			entity.HasIndex(x => new { x.TenantId, x.OccurredAtUtc }).HasDatabaseName("IX_AuditLog_TenantId_OccurredAtUtc");
+			entity.HasIndex(x => new { x.ResourceType, x.ResourceId }).HasDatabaseName("IX_AuditLog_ResourceType_ResourceId");
 		});
 	}
 }

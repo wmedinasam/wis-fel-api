@@ -11,6 +11,9 @@ public sealed class Agent
     public string NormalizedName { get; set; } = string.Empty;
     public string CredentialHash { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
+    public string? MachineHostname { get; set; }
+    public string? MachineId { get; set; }
+    public string? MachineOs { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastHandshakeAtUtc { get; set; }
     public DateTimeOffset? LastHeartbeatAtUtc { get; set; }

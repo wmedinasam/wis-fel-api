@@ -9,6 +9,9 @@ public sealed class Company
     public string Name { get; set; } = string.Empty;
     public string NormalizedName { get; set; } = string.Empty;
     public string CountryCode { get; set; } = string.Empty;
+    public string? TaxId { get; set; }
+    public string? CurrencyCode { get; set; }
+    public string? Timezone { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public Tenant Tenant { get; set; } = null!;
